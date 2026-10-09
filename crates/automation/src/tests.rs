@@ -507,3 +507,19 @@ fn agents_doc_tools_table_is_current() {
     }
     assert!(missing.is_empty(), "docs/agents.md's Tools table is missing: {missing:#?}");
 }
+
+#[test]
+fn listing_and_tools_carry_effect_metadata() {
+    let mut s = server();
+    let cmds = call_json(&mut s, "list_commands", json!({}));
+    let cmds = cmds.as_array().unwrap();
+    assert!(cmds.iter().all(|c| c["journal"].is_boolean()), "every command says whether it is journaled");
+    assert!(cmds.iter().any(|c| c["id"] == "command.list" && c["journal"] == false));
+    assert!(cmds.iter().any(|c| c["id"] == "comp.new" && c["journal"] == true));
+    let tools = rpc(&mut s, 1, "tools/list", json!({}))["tools"].as_array().unwrap().clone();
+    let ann = |n: &str| tools.iter().find(|t| t["name"] == n).unwrap()["annotations"].clone();
+    assert_eq!(ann("list_commands"), json!({"readOnlyHint": true, "destructiveHint": false}));
+    assert_eq!(ann("execute_command"), json!({"readOnlyHint": false, "destructiveHint": true}));
+    assert_eq!(ann("add_effect"), json!({"readOnlyHint": false, "destructiveHint": false}));
+    assert_eq!(ann("render_frame"), json!({"readOnlyHint": false}));
+}

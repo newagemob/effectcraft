@@ -19,7 +19,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
                 return None;
             }
             let mut o =
-                json!({"id": c.id, "label": c.label, "menu": c.menu, "shortcut": c.shortcut, "params": c.params, "enabled": en.is_ok(), "why": en.err()});
+                json!({"id": c.id, "label": c.label, "menu": c.menu, "shortcut": c.shortcut, "params": c.params, "enabled": en.is_ok(), "why": en.err(), "journal": c.journal});
             if schemas {
                 o["schema"] = super::params_schema(c);
             }

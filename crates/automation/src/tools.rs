@@ -33,7 +33,37 @@ impl ToolDef {
     }
     /// The MCP `Tool` object.
     pub fn descriptor(&self) -> Value {
-        json!({"name": self.name, "description": self.description, "inputSchema": self.input_schema()})
+        let mut d = json!({"name": self.name, "description": self.description, "inputSchema": self.input_schema()});
+        let (read_only, destructive) = hints(self.name);
+        let mut a = serde_json::Map::new();
+        if let Some(r) = read_only {
+            a.insert("readOnlyHint".into(), json!(r));
+        }
+        if let Some(x) = destructive {
+            a.insert("destructiveHint".into(), json!(x));
+        }
+        if !a.is_empty() {
+            d["annotations"] = Value::Object(a);
+        }
+        d
+    }
+}
+
+/// MCP `annotations` where they are known: `(readOnlyHint, destructiveHint)`. Read-only tools never
+/// destroy; tools that can change or remove what exists (any command, script, property values,
+/// undo/redo, saving over a file) are destructive; tools that only add are not. Raw UI input and
+/// ScriptUI depend on what they drive: omitted.
+fn hints(name: &str) -> (Option<bool>, Option<bool>) {
+    match name {
+        "list_commands" | "describe_command" | "get_project" | "get_comp" | "get_layer" | "get_property" | "list_effects" | "list_fonts" | "get_state"
+        | "screenshot" | "ui_inspect" | "ui_elements" => (Some(true), Some(false)),
+        "execute_command" | "run_script" | "set_property" | "save_project" | "open_project" | "undo" | "redo" | "batch" | "control" => {
+            (Some(false), Some(true))
+        }
+        "add_effect" | "history" => (Some(false), Some(false)),
+        // `render_frame` with `path` writes a file; `add_keyframe` may replace a key at that time.
+        "render_frame" | "add_keyframe" | "script_ui" | "ui_click" | "ui_drag" | "ui_key" | "ui_type" | "ui_set" => (Some(false), None),
+        _ => (None, None),
     }
 }
 
