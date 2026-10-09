@@ -16,6 +16,8 @@ pub struct BridgeClient {
     addr: String,
     conn: Option<(BufReader<TcpStream>, TcpStream)>,
     next_id: u64,
+    /// Sent as `auth {token}` on every new connection (see `crate::control_client`).
+    token: Option<String>,
 }
 
 impl BridgeClient {
@@ -26,7 +28,16 @@ impl BridgeClient {
         if !matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1") {
             return Err(Error::BadArgs(format!("bridge address must be loopback (PORT or 127.0.0.1:PORT), got `{addr}`")));
         }
-        Ok(Self { addr, conn: None, next_id: 1 })
+        let token = crate::control_client::token_from_env().map_err(Error::BadArgs)?;
+        Ok(Self { addr, conn: None, next_id: 1, token })
+    }
+
+    /// Authenticate with `token` (instead of `EFFECTCRAFT_CONTROL_TOKEN[_FILE]`).
+    pub fn with_token(mut self, token: Option<String>) -> Self {
+        if token.is_some() {
+            self.token = token;
+        }
+        self
     }
 
     pub fn addr(&self) -> &str {
@@ -45,7 +56,19 @@ impl BridgeClient {
         s.set_read_timeout(Some(READ_TIMEOUT)).ok();
         s.set_nodelay(true).ok();
         let r = s.try_clone().map_err(|e| Error::Bridge(e.to_string()))?;
-        Ok((BufReader::new(r), s))
+        let (mut r, mut s) = (BufReader::new(r), s);
+        if let Some(token) = &self.token {
+            let line = format!("{}\n", json!({"id": 0, "method": "auth", "params": {"token": token}}));
+            s.write_all(line.as_bytes()).map_err(|e| Error::Bridge(e.to_string()))?;
+            let mut buf = String::new();
+            r.read_line(&mut buf).map_err(|e| Error::Bridge(e.to_string()))?;
+            let v: Value = serde_json::from_str(buf.trim()).unwrap_or(Value::Null);
+            if v.get("ok").and_then(Value::as_bool) != Some(true) {
+                let why = v.get("error").and_then(Value::as_str).unwrap_or("no reply");
+                return Err(Error::Bridge(format!("{}: control channel refused the token: {why}", self.addr)));
+            }
+        }
+        Ok((r, s))
     }
 
     /// Call a control method; returns the reply's `result`, or the app's `error` as [`Error::App`].

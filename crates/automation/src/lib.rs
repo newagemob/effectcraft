@@ -18,6 +18,7 @@
 pub mod backend;
 pub mod base64;
 pub mod bridge;
+pub mod control_client;
 pub mod server;
 pub mod tools;
 

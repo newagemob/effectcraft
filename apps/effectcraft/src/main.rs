@@ -1,11 +1,13 @@
 //! EffectCraft desktop app.
 //!
-//! Usage: `effectcraft [--control <port>] [--demo|--empty|--home] [project.ecproj | media files…]`
+//! Usage: `effectcraft [--control <port>] [--control-token HEX | --control-token-file PATH]
+//! [--control-port-file PATH] [--control-no-auth] [--demo|--empty|--home] [project.ecproj | media files…]`
 //!
 //! Without a project the app starts with an empty Untitled Project, as After Effects does;
 //! `--demo` opens the demo project instead (also Help ▸ Open Demo Project).
 //!
-//! `--control <port>` (or `EFFECTCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server;
+//! `--control <port>` (or `EFFECTCRAFT_CONTROL_PORT`; 0 = any free port) starts a localhost JSON-lines
+//! control server whose connections first authenticate with the per-launch token (`control_auth`);
 //! see `effectcraft_ui_egui::control` for the methods.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -14,6 +16,7 @@
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod appimage;
 mod audio_out;
+mod control_auth;
 mod control_server;
 mod launch_guard;
 #[cfg(target_os = "macos")]
@@ -69,7 +72,8 @@ fn main() -> eframe::Result {
     // Help ▸ Enable Logging writes through this logger; warnings feed the compatibility report.
     effectcraft_engine::logging::install();
     effectcraft_engine::logging::install_panic_hook();
-    let Some(Args { control_port, files, demo, home }) = parse_args(std::env::args().skip(1), std::env::var("EFFECTCRAFT_CONTROL_PORT").ok()) else {
+    let (control_rest, control_args) = control_auth::split_or_exit(std::env::args().skip(1));
+    let Some(Args { control_port, files, demo, home }) = parse_args(control_rest, std::env::var("EFFECTCRAFT_CONTROL_PORT").ok()) else {
         println!("effectcraft {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     };
@@ -101,6 +105,7 @@ fn main() -> eframe::Result {
     // Start-up milestones: with `RUST_LOG=info` they go to stderr, so a window that never
     // appears shows how far start-up got (#234).
     log::info!("effectcraft {}: opening the window", env!("CARGO_PKG_VERSION"));
+    let control = control_auth::resolve_or_exit(control_port, &control_args);
     let result = eframe::run_native(
         "EffectCraft",
         options,
@@ -194,9 +199,9 @@ fn main() -> eframe::Result {
                 app.hooks.app_action = Some(Box::new(native_menu::app_action));
                 app.hooks.clipboard_text = Some(Box::new(native_menu::clipboard_text));
             }
-            if let Some(port) = control_port {
+            if let Some((port, auth)) = control.clone() {
                 disable_app_nap();
-                let rx = control_server::start(port, cc.egui_ctx.clone());
+                let rx = control_server::start(port, auth, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }
             log::info!("app created; the window shows after its first frame");

@@ -109,7 +109,8 @@ const USAGE: &str = "usage: effectcraft-cli <info|commands|exec|run|props|get|se
   script FILE.jsx [F.ecproj] | --eval CODE run JavaScript with the After Effects-style object model
                                            (app.project, comps, layers, properties…); prints writeLn
                                            output and the result; errors exit 1 with file:line:col
-  mcp [--bridge PORT]                      MCP server (JSON-RPC over stdio)
+  mcp [--bridge PORT]                      MCP server (JSON-RPC over stdio); with --control-token HEX |
+                                           --control-token-file F | --control-port-file F (app's token)
 options: --project F.ecproj | --demo | --empty   --save | --save-as F   --bridge PORT   --json   --gpu
 <comp>: id or name, '-' = active comp; <layer>: id, '#n' or name; <value>: JSON or bare string";
 
@@ -123,6 +124,9 @@ const VALUED: &[&str] = &[
     "--params",
     "--project",
     "--bridge",
+    "--control-token",
+    "--control-token-file",
+    "--control-port-file",
     "--save-as",
     "--filter",
     "--time",
@@ -302,11 +306,18 @@ fn usage_err<T>(m: &str) -> Result<T, Failure> {
 
 /// Build the backend: a bridge to the app, or a headless session with the requested project.
 fn backend(args: &Args, default_demo: bool) -> Result<Backend, Failure> {
-    if let Some(addr) = args.opt("--bridge") {
+    // `--control-port-file` (from `effectcraft --control 0 --control-port-file F`) gives the address and token.
+    let control = effectcraft_automation::control_client::ControlClientArgs {
+        token: args.opt("--control-token").map(str::to_string),
+        token_file: args.opt("--control-token-file").map(std::path::PathBuf::from),
+        port_file: args.opt("--control-port-file").map(std::path::PathBuf::from),
+    };
+    let (file_addr, token) = control.resolve().map_err(Failure::Error)?;
+    if let Some(addr) = args.opt("--bridge").map(str::to_string).or(file_addr) {
         if args.project.is_some() || args.flag("--demo") {
             return usage_err("--bridge drives the running app's project; use `exec file.open` to open another");
         }
-        return Ok(Backend::bridge(addr)?);
+        return Ok(Backend::bridge_with_token(&addr, token)?);
     }
     let mut b = Backend::headless(session(args)?);
     if let Some(p) = &args.project {

@@ -32,6 +32,11 @@ impl Backend {
         Ok(Backend::Bridge(BridgeClient::new(addr)?))
     }
 
+    /// [`Backend::bridge`] authenticating with `token` (see `crate::control_client`).
+    pub fn bridge_with_token(addr: &str, token: Option<String>) -> Result<Self> {
+        Ok(Backend::Bridge(BridgeClient::new(addr)?.with_token(token)))
+    }
+
     pub fn is_bridge(&self) -> bool {
         matches!(self, Backend::Bridge(_))
     }
